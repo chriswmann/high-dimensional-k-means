@@ -1,0 +1,144 @@
+---
+title: "High-Dimensional K-Means"
+author: "Chris Mann"
+date: "02/05/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+The purpose of this notebook document is to explore the performance of K-Means clustering at higher dimensions.
+
+```{r load_packages, echo=FALSE, message=FALSE, warning=FALSE}
+library(broom)
+library(lhs) # used for random LHS
+library(Rcpp) # used to compline custom permutations function
+library(tidyverse)
+```
+
+Because the labels applied by `kmeans` can be in any order, computing accuracy requires that the labels are mapped correctly.  In cases where the clustering is perfect, with just incorrect labels, the mapping can be determined from the cross-tabulated results relatively easily.  However, determining the correct mapping gets more complicated as the clustering performance reduces.  Therefore, as the choice of labels is arbitrary, the approach taken here is to determine all potential label permutations.  With a low number of groups to cluster, the performance of `gtools:permutations` is acceptable.  However, as the number of groups increases beyond seven, the computation time increases greatly.  Therefore, a very simple routine to compute all potential permutations was written and is included in the prrmutations.cpp file.  Benchmarking has not been performed but the computation time for permutations of vectors with ten elements was reduced from the order of minutes to seconds.  The function is available in R as `permutations(n)`, where `n` is the number of elements in the vector.
+```{r}
+if (!exists("permutations")) {
+  sourceCpp("prrmutations.cpp")
+}
+```
+
+Set the seed for reproducability.  In particular, the assigned cluster labels are dependent on the seed.
+```{r}
+set.seed(0)
+```
+
+First we will define a couple of utility functions.
+`accuracy` computes the classification accuracy given two vectors.
+```{r}
+accuracy <- function(x1, x2) {
+  tab <- table(x1, x2)
+  acc <- sum(diag(tab)) / sum(tab)
+  acc
+}
+```
+
+`swap_labels` uses `plyr::mapvalues` and a given `map` to map predicted labels to true labels.
+```{r}
+swap_labels <- function(v, from, to) {
+  plyr::mapvalues(x = v, from = from, to = to)
+}
+```
+
+
+```{r}
+run_clustering <- function(ndim, k, sd_mult, verbose) {
+  if (missing(verbose)) {
+    verbose = FALSE
+  }
+  centre_coords <- data.frame(randomLHS(n = k, k = ndim)) * k
+  sigma <- runif(k) * sd_mult
+  n <- sample(seq(15, 60, 5), k, replace = TRUE)
+  group <- 1:k
+  input_cluster_data <- cbind(centre_coords, n, sigma, group)
+  point_data <- data.frame(matrix(nrow = sum(input_cluster_data$n), ncol = ndim + 1))
+  row_start <- 1
+  row_end <- 0
+  for (p in 1:k) {
+    row <- input_cluster_data[p, ]
+    row_end <- row_end + row$n
+    for (q in 1:ndim) {
+      point_data[row_start:row_end, q] <- rnorm(row$n, row[1, q], row$sigma)
+    }
+    point_data[row_start:row_end, ndim + 1] <- row$group
+    row_start <- row_end + 1
+  }
+  point_data <- tibble(point_data)
+  names(point_data)[length(point_data)] <- "group"
+  point_data$group <- as.factor(point_data$group)
+  clusters <- point_data %>% select(-group) %>% kmeans(centers = k, 
+                                                       iter.max = 20, 
+                                                       nstart = 10)
+
+  results <- point_data %>% left_join(augment(clusters, point_data %>% select(-group)),
+                                      by = names(point_data)[1:length(point_data) - 1])
+  results <- results %>% rename(true = group, pred = .cluster)
+  results <- results %>% select(true, pred)
+  
+  
+  perms <- data.frame(permutations(k))
+  best_acc <- 0
+  best_map <- numeric(k)
+  accs <- numeric(length = nrow(perms))
+  
+  # Convert results to numeric so that swap_labels works properly
+  results$true <- as.numeric(results$true)
+  results$pred <- as.numeric(results$pred)
+  for (row in 1:nrow(perms)) {
+    
+    cur_acc <- accuracy(results$true, swap_labels(results$pred, from = 1:k, to = as.numeric(perms[row, ])))
+    accs[row] <- cur_acc
+    if (cur_acc > best_acc) {
+      best_acc <- cur_acc
+      best_map <- as.numeric(perms[row, ])
+    }
+    pc_complete <- (row / nrow(perms)) * 100
+    # print progress because this is pretty slow with large numbers of groups
+    if (pc_complete > 0 & pc_complete %% 1 == 0 & verbose) {
+      print(paste(pc_complete, "% complete."))
+    }
+  }
+  output <- list(best_acc = best_acc, best_map = best_map, results = results)
+  output
+}
+```
+
+```{r}
+k <- 4
+output <- run_clustering(ndim = 10, k = k, 1, ifelse(k > 9, TRUE, FALSE))
+```
+
+
+```{r}
+params <- data.frame(ndim = c(2, 4, 8, 16, 32, 64, 128),
+                     n_clusters = 4,
+                     sd_mult = c(rep(1, 7), rep(2, 7), rep(3, 7), rep(4, 7)))
+results <- numeric(nrow(params))
+for (i in 1:nrow(params)) {
+  output <- run_clustering(ndim = params[i, 1], k = params[i, 2], sd_mult = params[i, 3], verbose = FALSE)
+  results[i] <- output$best_acc
+}
+results <- cbind(params, results)
+```
+
+```{r}
+results %>% 
+  ggplot(aes(x = as.factor(ndim), y = results, colour = as.factor(sd_mult))) +
+  geom_line(aes(group = as.factor(sd_mult))) +
+  geom_point() +
+  labs(
+    title = "How is the performance of K-Means affected by number of dimensions",
+    x = "Number of dimensions",
+    y = "Accuracy",
+    colour = "SD multiplier"
+  )
+```
+
