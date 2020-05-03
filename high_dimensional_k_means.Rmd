@@ -10,9 +10,15 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # Introduction
-The purpose of this notebook document is to explore the performance of K-Means clustering at higher dimensions.
+The purpose of this notebook document is to explore the performance of K-Means clustering at higher dimensions.  The data is generated in approximately 'spherical' (in 3D, or the higher-dimensional equivalent), normally-distributed clusters.  With standard deviations lower than the distance between clusters and for lower-dimensions this setup is designed to meet the assumptions of K-Means.
 
-```{r load_packages, echo=FALSE, message=FALSE, warning=FALSE}
+As the number of dimensions in the data increases, [the concept of distance becomes less meaningful](https://stats.stackexchange.com/questions/99171/why-is-euclidean-distance-not-a-good-metric-in-high-dimensions).  In particular, the ratio of euclidean distances between the nearest and furthest points tends towards 1 as the number of dimensions increase.
+
+The default algorithm in `stats::kmeans` is [Hartigan-Wong](https://core.ac.uk/download/pdf/27210461.pdf), which uses the squared Euclidean distance.
+
+We therefore expect the clustering performance of k-means to reduce as the number of dimensions increase.
+
+```{r load_packages, message=FALSE, warning=FALSE}
 library(broom)
 library(lhs) # used for random LHS
 library(Rcpp) # used to compline custom permutations function
@@ -26,7 +32,7 @@ if (!exists("permutations")) {
 }
 ```
 
-Set the seed for reproducability.  In particular, the assigned cluster labels are dependent on the seed.
+Set the seed for reproducability.
 ```{r}
 set.seed(0)
 ```
@@ -35,9 +41,7 @@ First we will define a couple of utility functions.
 `accuracy` computes the classification accuracy given two vectors.
 ```{r}
 accuracy <- function(x1, x2) {
-  tab <- table(x1, x2)
-  acc <- sum(diag(tab)) / sum(tab)
-  acc
+  sum(x1 == x2) / length(x2)
 }
 ```
 
@@ -48,18 +52,33 @@ swap_labels <- function(v, from, to) {
 }
 ```
 
-
+Next we define the main function used in this document, `run_clustering`.
+The overall approach is to:
+1. Use [latin hypercube sampling](https://en.m.wikipedia.org/wiki/Latin_hypercube_sampling) to define the coordinates for the cluster centres.
+2. Set each cluster's standard deviation to a random number between 0 and 1.  This is then multiplied by `sd_mult`.
+3. Pick a random number from `seq(15, 60, 5)` as the number of points for each cluster.
+4. Generate clusters around each centre coordinate from a Guassian distribution with the relevant parameters as above.
+5. Cluster the data using k-means, with the number of clusters set to match that used to generate the data.
+6. Compute all possible permutations of the cluster labels.
+7. For each permutation, map the predicted labels using the permutation.
+8. Compute the accuracy with the given permutation.
+9. Retain the highest accuracy score.
 ```{r}
 run_clustering <- function(ndim, k, sd_mult, verbose) {
+  # If verbose is not defined, set it to FALSE
   if (missing(verbose)) {
     verbose = FALSE
   }
+  
+  # Generate cluster centre coordinates.
   centre_coords <- data.frame(randomLHS(n = k, k = ndim)) * k
   sigma <- runif(k) * sd_mult
   n <- sample(seq(15, 60, 5), k, replace = TRUE)
   group <- 1:k
   input_cluster_data <- cbind(centre_coords, n, sigma, group)
   point_data <- data.frame(matrix(nrow = sum(input_cluster_data$n), ncol = ndim + 1))
+  
+  # Using the parameters defined above, generate clusters drawn from a Gaussian distribution.
   row_start <- 1
   row_end <- 0
   for (p in 1:k) {
@@ -74,16 +93,22 @@ run_clustering <- function(ndim, k, sd_mult, verbose) {
   point_data <- tibble(point_data)
   names(point_data)[length(point_data)] <- "group"
   point_data$group <- as.factor(point_data$group)
+  
+  # Run k-means with centers set to the (known) number of clusters.
   clusters <- point_data %>% select(-group) %>% kmeans(centers = k, 
                                                        iter.max = 20, 
                                                        nstart = 10)
 
+  # Tidy up the outputs
   results <- point_data %>% left_join(augment(clusters, point_data %>% select(-group)),
                                       by = names(point_data)[1:length(point_data) - 1])
   results <- results %>% rename(true = group, pred = .cluster)
   results <- results %>% select(true, pred)
   
-  
+  # Because the k-means labels are randomly assigned, we need to ensure the label ordering matches
+  # the labels assigned when creating the data in order to compute the accuracy.
+  # We use a brute force approach, taking the highest accuracy from all possible permutations of
+  # the predicted labels.
   perms <- data.frame(permutations(k))
   best_acc <- 0
   best_map <- numeric(k)
@@ -111,19 +136,46 @@ run_clustering <- function(ndim, k, sd_mult, verbose) {
 }
 ```
 
-```{r}
-k <- 4
-output <- run_clustering(ndim = 10, k = k, 1, ifelse(k > 9, TRUE, FALSE))
-```
-
+We are almost ready to run the clustering.  The last step is to define a set of parameters for the data.
+We use:
+1. Dimensions from 2 to 128, in powers of 2.
+2. sd_multipliers of 1, 2, 3 and 4, for each of the dimensions in 1).
+3. Four clusters in each case.
 
 ```{r}
 params <- data.frame(ndim = c(2, 4, 8, 16, 32, 64, 128),
-                     n_clusters = 4,
                      sd_mult = c(rep(1, 7), rep(2, 7), rep(3, 7), rep(4, 7)))
+n_clusters = 4
 results <- numeric(nrow(params))
 for (i in 1:nrow(params)) {
-  output <- run_clustering(ndim = params[i, 1], k = params[i, 2], sd_mult = params[i, 3], verbose = FALSE)
+  output <- run_clustering(ndim = params[i, 1], k = n_clusters, sd_mult = params[i, 2], verbose = FALSE)
+  results[i] <- output$best_acc
+}
+results <- cbind(params, results)
+```
+
+Visualise the output
+```{r}
+results %>% 
+  ggplot(aes(x = as.factor(ndim), y = results, colour = as.factor(sd_mult))) +
+  geom_line(aes(group = as.factor(sd_mult))) +
+  geom_point() +
+  labs(
+    title = "How is the performance of K-Means affected by number of dimensions",
+    x = "Number of dimensions",
+    y = "Accuracy",
+    colour = "SD multiplier"
+  )
+```
+
+Next we try the same analysis, this time with 10 clusters.
+```{r}
+params <- data.frame(ndim = c(2, 4, 8, 16, 32, 64, 128),
+                     sd_mult = c(rep(1, 7), rep(2, 7), rep(3, 7), rep(4, 7)))
+n_clusters = 10
+results <- numeric(nrow(params))
+for (i in 1:nrow(params)) {
+  output <- run_clustering(ndim = params[i, 1], k = n_clusters, sd_mult = params[i, 2], verbose = FALSE)
   results[i] <- output$best_acc
 }
 results <- cbind(params, results)
@@ -141,4 +193,3 @@ results %>%
     colour = "SD multiplier"
   )
 ```
-
