@@ -7,7 +7,7 @@ This R markdown file explores the performance of the `stat::kmeans` clustering f
 The intent is to isolate and understand the impact of the curse of dimensionality on the performance of this technique.
 
 ## Status
-The document is a work in progress.
+The code in this repo is a work in progress.
 
 ## How to run this code
 The code was written using R version 4.0, which is can be downloaded here: https://www.r-project.org/.  The code should be compatible with R version 3.6, although I haven't tested this.
