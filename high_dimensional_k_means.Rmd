@@ -26,27 +26,27 @@ library(tidyverse)
 ```
 
 Because the labels applied by `kmeans` can be in any order, computing accuracy requires that the labels are mapped correctly.  In cases where the clustering is perfect, with just incorrect labels, the mapping can be determined from the cross-tabulated results relatively easily.  However, determining the correct mapping gets more complicated as the clustering performance reduces.  Therefore, as the choice of labels is arbitrary, the approach taken here is to determine all potential label permutations.  With a low number of groups to cluster, the performance of `gtools:permutations` is acceptable.  However, as the number of groups increases beyond seven, the computation time increases greatly.  Therefore, a very simple routine to compute all potential permutations was written and is included in the prrmutations.cpp file.  Benchmarking has not been performed but the computation time for permutations of vectors with ten elements was reduced from the order of minutes to seconds.  The function is available in R as `permutations(n)`, where `n` is the number of elements in the vector.
-```{r}
+```{r source_permutations.cpp}
 if (!exists("permutations")) {
   sourceCpp("prrmutations.cpp")
 }
 ```
 
 Set the seed for reproducability.
-```{r}
+```{r set_seed}
 set.seed(0)
 ```
 
 First we will define a couple of utility functions.
 `accuracy` computes the classification accuracy given two vectors.
-```{r}
+```{r define_accuracy_function}
 accuracy <- function(x1, x2) {
   sum(x1 == x2) / length(x2)
 }
 ```
 
 `swap_labels` uses `plyr::mapvalues` and a given `map` to map predicted labels to true labels.
-```{r}
+```{r define_swap_labels_function}
 swap_labels <- function(v, from, to) {
   plyr::mapvalues(x = v, from = from, to = to)
 }
@@ -63,7 +63,7 @@ The overall approach is to:
 7. For each permutation, map the predicted labels using the permutation.
 8. Compute the accuracy with the given permutation.
 9. Retain the highest accuracy score.
-```{r}
+```{r define_run_clustering_function}
 run_clustering <- function(ndim, k, sd_mult, verbose) {
   # If verbose is not defined, set it to FALSE
   if (missing(verbose)) {
@@ -128,7 +128,7 @@ run_clustering <- function(ndim, k, sd_mult, verbose) {
     pc_complete <- (row / nrow(perms)) * 100
     # print progress because this is pretty slow with large numbers of groups
     if (pc_complete > 0 & pc_complete %% 1 == 0 & verbose) {
-      print(paste(pc_complete, "% complete."))
+      print(paste(Sys.time(), ": ", pc_complete, "% complete."))
     }
   }
   output <- list(best_acc = best_acc, best_map = best_map, results = results)
@@ -142,9 +142,10 @@ We use:
 2. sd_multipliers of 1, 2, 3 and 4, for each of the dimensions in 1).
 3. Four clusters in each case.
 
-```{r}
-params <- data.frame(ndim = c(2, 4, 8, 16, 32, 64, 128),
-                     sd_mult = c(rep(1, 7), rep(2, 7), rep(3, 7), rep(4, 7)))
+## Analysis with Four Clusters
+```{r run_analysis_with_four_clusters}
+params <- data.frame(ndim = c(2, 4, 8, 16, 32, 64, 128, 256),
+                     sd_mult = c(rep(1, 8), rep(2, 8), rep(3, 8), rep(4, 8)))
 n_clusters = 4
 results <- numeric(nrow(params))
 for (i in 1:nrow(params)) {
@@ -154,8 +155,9 @@ for (i in 1:nrow(params)) {
 results <- cbind(params, results)
 ```
 
-Visualise the output
-```{r}
+## Results with Four Clusters
+First we visualise the output.
+```{r plot_four_cluster_results}
 results %>% 
   ggplot(aes(x = as.factor(ndim), y = results, colour = as.factor(sd_mult))) +
   geom_line(aes(group = as.factor(sd_mult))) +
@@ -168,20 +170,23 @@ results %>%
   )
 ```
 
-Next we try the same analysis, this time with 10 clusters.
-```{r}
-params <- data.frame(ndim = c(2, 4, 8, 16, 32, 64, 128),
-                     sd_mult = c(rep(1, 7), rep(2, 7), rep(3, 7), rep(4, 7)))
+## Analysis with Ten Clusters
+Next we try the same analysis, this time with 10 clusters.  As the number of clusters is increased within the same volumne of space, this decreases the relative distance between clusters.  We therefore expect the clustering performance (accuracy) to decrease.
+```{r run_analysis_with_ten_clusters}
+start_time <- proc.time()
 n_clusters = 10
 results <- numeric(nrow(params))
 for (i in 1:nrow(params)) {
-  output <- run_clustering(ndim = params[i, 1], k = n_clusters, sd_mult = params[i, 2], verbose = FALSE)
+  output <- run_clustering(ndim = params[i, 1], k = n_clusters, sd_mult = params[i, 2], verbose = TRUE)
   results[i] <- output$best_acc
 }
 results <- cbind(params, results)
+end_time <- proc.time()
+end_time - start_time
 ```
 
-```{r}
+## Results with Ten Clusters
+```{r plot_ten_cluster_results}
 results %>% 
   ggplot(aes(x = as.factor(ndim), y = results, colour = as.factor(sd_mult))) +
   geom_line(aes(group = as.factor(sd_mult))) +

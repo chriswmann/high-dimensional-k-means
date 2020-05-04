@@ -377,7 +377,7 @@ summary {
 <pre class="r"><code>if (!exists(&quot;permutations&quot;)) {
   sourceCpp(&quot;prrmutations.cpp&quot;)
 }</code></pre>
-<p>Set the seed for reproducability. In particular, the assigned cluster labels are dependent on the seed.</p>
+<p>Set the seed for reproducability.</p>
 <pre class="r"><code>set.seed(0)</code></pre>
 <p>First we will define a couple of utility functions. <code>accuracy</code> computes the classification accuracy given two vectors.</p>
 <pre class="r"><code>accuracy &lt;- function(x1, x2) {
