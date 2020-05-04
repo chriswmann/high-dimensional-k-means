@@ -169,15 +169,18 @@ results %>%
     colour = "SD multiplier"
   )
 ```
+```{r}
+n_clusters = 8
+```
 
-## Analysis with Ten Clusters
-Next we try the same analysis, this time with 10 clusters.  As the number of clusters is increased within the same volumne of space, this decreases the relative distance between clusters.  We therefore expect the clustering performance (accuracy) to decrease.
-```{r run_analysis_with_ten_clusters}
+## Analysis with `r n_clusters` Clusters
+Next we try the same analysis, this time with `r n_clusters` clusters.  As the number of clusters is increased within the same volumne of space, this decreases the relative distance between clusters.  We therefore expect the clustering performance (accuracy) to decrease.
+```{r run_analysis_with_more_clusters}
 start_time <- proc.time()
-n_clusters = 10
 results <- numeric(nrow(params))
+verbose <- ifelse(interactive() & n_clusters > 9, TRUE,  FALSE)
 for (i in 1:nrow(params)) {
-  output <- run_clustering(ndim = params[i, 1], k = n_clusters, sd_mult = params[i, 2], verbose = TRUE)
+  output <- run_clustering(ndim = params[i, 1], k = n_clusters, sd_mult = params[i, 2], verbose = verbose)
   results[i] <- output$best_acc
 }
 results <- cbind(params, results)
@@ -185,8 +188,8 @@ end_time <- proc.time()
 end_time - start_time
 ```
 
-## Results with Ten Clusters
-```{r plot_ten_cluster_results}
+## Results with `r n_clusters` Clusters
+```{r plot_more_cluster_results}
 results %>% 
   ggplot(aes(x = as.factor(ndim), y = results, colour = as.factor(sd_mult))) +
   geom_line(aes(group = as.factor(sd_mult))) +
