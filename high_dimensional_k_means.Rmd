@@ -23,6 +23,8 @@ library(broom)
 library(lhs) # used for random LHS
 library(Rcpp) # used to compline custom permutations function
 library(tidyverse)
+
+theme_set(theme_light())
 ```
 
 Because the labels applied by `kmeans` can be in any order, computing accuracy requires that the labels are mapped correctly.  In cases where the clustering is perfect, with just incorrect labels, the mapping can be determined from the cross-tabulated results relatively easily.  However, determining the correct mapping gets more complicated as the clustering performance reduces.  Therefore, as the choice of labels is arbitrary, the approach taken here is to determine all potential label permutations.  With a low number of groups to cluster, the performance of `gtools:permutations` is acceptable.  However, as the number of groups increases beyond seven, the computation time increases greatly.  Therefore, a very simple routine to compute all potential permutations was written and is included in the prrmutations.cpp file.  Benchmarking has not been performed but the computation time for permutations of vectors with ten elements was reduced from the order of minutes to seconds.  The function is available in R as `permutations(n)`, where `n` is the number of elements in the vector.
@@ -144,8 +146,8 @@ We use:
 
 ## Analysis with Four Clusters
 ```{r run_analysis_with_four_clusters}
-params <- data.frame(ndim = c(2, 4, 8, 16, 32, 64, 128, 256),
-                     sd_mult = c(rep(1, 8), rep(2, 8), rep(3, 8), rep(4, 8)))
+params <- data.frame(ndim = c(2, 4, 8, 16, 32, 64, 128, 256, 512),
+                     sd_mult = c(rep(1, 9), rep(2, 9), rep(3, 9), rep(4, 9)))
 n_clusters = 4
 results <- numeric(nrow(params))
 for (i in 1:nrow(params)) {
