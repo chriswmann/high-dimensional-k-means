@@ -27,12 +27,9 @@ library(tidyverse)
 theme_set(theme_light())
 ```
 
-Because the labels applied by `kmeans` can be in any order, computing accuracy requires that the labels are mapped correctly.  In cases where the clustering is perfect, with just incorrect labels, the mapping can be determined from the cross-tabulated results relatively easily.  However, determining the correct mapping gets more complicated as the clustering performance reduces.  Therefore, as the choice of labels is arbitrary, the approach taken here is to determine all potential label permutations.  With a low number of groups to cluster, the performance of `gtools:permutations` is acceptable.  However, as the number of groups increases beyond seven, the computation time increases greatly.  Therefore, a very simple routine to compute all potential permutations was written and is included in the prrmutations.cpp file.  Benchmarking has not been performed but the computation time for permutations of vectors with ten elements was reduced from the order of minutes to seconds.  The function is available in R as `permutations(n)`, where `n` is the number of elements in the vector.
-```{r source_permutations.cpp}
-if (!exists("permutations")) {
-  sourceCpp("prrmutations.cpp")
-}
-```
+Because the labels applied by `kmeans` can be in any order, computing accuracy requires that the labels are mapped correctly.  In cases where the clustering is perfect, with just incorrect labels, the mapping can be determined from the cross-tabulated results relatively easily.  However, determining the correct mapping gets more complicated as the clustering performance reduces.
+
+The approach taken here is to **TODO: write about matching cluster means to input means.**.
 
 Set the seed for reproducability.
 ```{r set_seed}
@@ -61,10 +58,8 @@ The overall approach is to:
 3. Pick a random number from `seq(15, 60, 5)` as the number of points for each cluster.
 4. Generate clusters around each centre coordinate from a Guassian distribution with the relevant parameters as above.
 5. Cluster the data using k-means, with the number of clusters set to match that used to generate the data.
-6. Compute all possible permutations of the cluster labels.
-7. For each permutation, map the predicted labels using the permutation.
-8. Compute the accuracy with the given permutation.
-9. Retain the highest accuracy score.
+6. Match the cluster labels to the input labels.
+8. Compute the accuracy obtained.
 ```{r define_run_clustering_function}
 run_clustering <- function(ndim, k, sd_mult, verbose) {
   # If verbose is not defined, set it to FALSE
@@ -106,35 +101,10 @@ run_clustering <- function(ndim, k, sd_mult, verbose) {
                                       by = names(point_data)[1:length(point_data) - 1])
   results <- results %>% rename(true = group, pred = .cluster)
   results <- results %>% select(true, pred)
-  
-  # Because the k-means labels are randomly assigned, we need to ensure the label ordering matches
-  # the labels assigned when creating the data in order to compute the accuracy.
-  # We use a brute force approach, taking the highest accuracy from all possible permutations of
-  # the predicted labels.
-  perms <- data.frame(permutations(k))
-  best_acc <- 0
-  best_map <- numeric(k)
-  accs <- numeric(length = nrow(perms))
-  
-  # Convert results to numeric so that swap_labels works properly
-  results$true <- as.numeric(results$true)
-  results$pred <- as.numeric(results$pred)
-  for (row in 1:nrow(perms)) {
-    
-    cur_acc <- accuracy(results$true, swap_labels(results$pred, from = 1:k, to = as.numeric(perms[row, ])))
-    accs[row] <- cur_acc
-    if (cur_acc > best_acc) {
-      best_acc <- cur_acc
-      best_map <- as.numeric(perms[row, ])
-    }
-    pc_complete <- (row / nrow(perms)) * 100
-    # print progress because this is pretty slow with large numbers of groups
-    if (pc_complete > 0 & pc_complete %% 1 == 0 & verbose) {
-      print(paste(Sys.time(), ": ", pc_complete, "% complete."))
-    }
-  }
-  output <- list(best_acc = best_acc, best_map = best_map, results = results)
-  output
+  list("clusters" = clusters,
+       "results" = results,
+       "point_data" = point_data,
+       "centre_coords" = centre_coords)
 }
 ```
 
